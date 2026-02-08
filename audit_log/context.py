@@ -1,28 +1,39 @@
-# audit_log/context.py
+from contextlib import contextmanager
+from threading import local
 
-import threading
+_state = local()
 
-_thread_locals = threading.local()
-
-
+# ---------- request / user ----------
 def set_current_user(user):
-    _thread_locals.user = user
-
+    _state.user = user
 
 def get_current_user():
-    return getattr(_thread_locals, "user", None)
-
+    return getattr(_state, "user", None)
 
 def set_current_request(request):
-    _thread_locals.request = request
-
+    _state.request = request
 
 def get_current_request():
-    return getattr(_thread_locals, "request", None)
-
+    return getattr(_state, "request", None)
 
 def clear_context():
-    """Clear stored thread-local context (important for cleanup)."""
-    for attr in ("user", "request"):
-        if hasattr(_thread_locals, attr):
-            delattr(_thread_locals, attr)
+    _state.user = None
+    _state.request = None
+
+# ---------- audit logging switch ----------
+def is_audit_logging_disabled():
+    return getattr(_state, "audit_disabled", False)
+
+def disable_audit_logging():
+    _state.audit_disabled = True
+
+def enable_audit_logging():
+    _state.audit_disabled = False
+
+@contextmanager
+def audit_logging_disabled():
+    disable_audit_logging()
+    try:
+        yield
+    finally:
+        enable_audit_logging()

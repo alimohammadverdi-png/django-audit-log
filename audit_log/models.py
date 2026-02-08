@@ -1,83 +1,74 @@
-# audit_log/models.py
-
+from django.conf import settings
 from django.db import models
-from django.contrib.auth import get_user_model
-from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
-
-User = get_user_model()
-
-
-class Action(models.TextChoices):
-    CREATE = "CREATE", "Create"
-    UPDATE = "UPDATE", "Update"
-    DELETE = "DELETE", "Delete"
-    RESTORE = "RESTORE", "Restore"
-    HARD_DELETE = "HARD_DELETE", "Hard Delete"
-    USER_LOGIN = "USER_LOGIN", "User Login"
 
 
 class AuditLog(models.Model):
+    class Action(models.TextChoices):
+        CREATE = "create", "Create"
+        UPDATE = "update", "Update"
+        DELETE = "delete", "Delete"
+        BULK_DELETE = "bulk_delete", "Bulk delete"
+        BULK_UPDATE = "bulk_update", "Bulk update"
+        LOGIN = "login", "Login"
+        LOGOUT = "logout", "Logout"
+
     user = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
+        settings.AUTH_USER_MODEL,
         null=True,
         blank=True,
+        on_delete=models.SET_NULL,
         related_name="audit_logs",
     )
 
-    action = models.CharField(
-        max_length=50,
-        choices=Action.choices,
-        db_index=True,
-    )
-
+    action = models.CharField(max_length=50, db_index=True)
     resource = models.CharField(
-        max_length=100,
-        db_index=True,
-        default="",
+        max_length=255, default="", db_index=True
     )
 
     status = models.CharField(
-        max_length=10,
-        default="INFO",
-        db_index=True,
+        max_length=10, default="INFO", db_index=True
     )
-
     description = models.TextField(blank=True, default="")
 
     source = models.CharField(
-        max_length=10,
-        default="api",
-        db_index=True,
+        max_length=10, default="api", db_index=True
     )
 
     content_type = models.ForeignKey(
         ContentType,
-        on_delete=models.SET_NULL,
         null=True,
         blank=True,
+        on_delete=models.SET_NULL,
     )
     object_id = models.CharField(
-        max_length=255,
-        null=True,
-        blank=True,
-        db_index=True,
+        max_length=64, null=True, blank=True
     )
-    content_object = GenericForeignKey("content_type", "object_id")
 
     changes = models.JSONField(null=True, blank=True)
 
-    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    timestamp = models.DateTimeField(
+        auto_now_add=True, db_index=True
+    )
 
     class Meta:
         ordering = ("-timestamp",)
-        verbose_name = "Audit Log"
-        verbose_name_plural = "Audit Logs"
+        indexes = [
+            models.Index(fields=["action"]),
+            models.Index(fields=["resource"]),
+            models.Index(fields=["status"]),
+            models.Index(fields=["source"]),
+            models.Index(fields=["user"]),
+            models.Index(fields=["timestamp"]),
+            models.Index(fields=["content_type", "object_id"]),
+        ]
+
+    @property
+    def object_type(self):
+        return (
+            self.content_type.model_class().__name__
+            if self.content_type else None
+        )
 
     def __str__(self):
-        user_display = self.user.username if self.user else "system"
-        if self.content_object is None:
-            obj_info = self.resource or "General Event"
-            return f"{user_display} | {self.action} | {obj_info}"
-        return f"{user_display} | {self.action} | {self.content_object}"
+        return f"{self.user or 'system'} | {self.action} | {self.resource}"

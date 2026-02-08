@@ -22,6 +22,7 @@ from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
 )
+from audit_log.views_metrics import metrics_view
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -30,6 +31,9 @@ urlpatterns = [
     path('api/auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/accounts/', include('accounts.urls')), 
     path('api/', include('audit_log.api.urls')),
+    path("audit-log/", include("audit_log.urls")),
+    path("metrics/", metrics_view),
+
 ]
 
 if settings.DEBUG:

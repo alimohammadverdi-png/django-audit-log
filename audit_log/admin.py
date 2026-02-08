@@ -1,9 +1,9 @@
 # audit_log/admin.py
 
 from django.contrib import admin
-from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 import json
+
 from .models import AuditLog
 
 
@@ -38,6 +38,13 @@ class AuditLogAdmin(admin.ModelAdmin):
 
     ordering = ("-timestamp",)
 
+    # ✅ Step 2.2.2.2 – Admin Optimization
+    # حذف N+1 Query در admin list
+    list_select_related = ("user", "content_type")
+
+    # جلوگیری از load شدن dropdownهای سنگین
+    raw_id_fields = ("user", "content_type")
+
     # فیلدهای اصلی مدل که باید read-only باشند
     readonly_fields = [
         "id",
@@ -51,24 +58,24 @@ class AuditLogAdmin(admin.ModelAdmin):
         "content_type",
         "object_id",
         "changes",
-        "changes_formatted",  # نمایش فرمت شده changes
+        "changes_formatted",
     ]
 
     fieldsets = (
-        ('Basic Information', {
-            'fields': ('id', 'timestamp', 'action', 'resource', 'status', 'source')
+        ("Basic Information", {
+            "fields": ("id", "timestamp", "action", "resource", "status", "source")
         }),
-        ('Description & Object', {
-            'fields': ('description', 'content_type', 'object_id')
+        ("Description & Object", {
+            "fields": ("description", "content_type", "object_id")
         }),
-        ('User Information', {
-            'fields': ('user',),
-            'classes': ('collapse',)
+        ("User Information", {
+            "fields": ("user",),
+            "classes": ("collapse",),
         }),
-        ('Changes (JSON)', {
-            'fields': ('changes_formatted',),
-            'classes': ('collapse', 'wide'),
-            'description': 'Detailed changes made to the object'
+        ("Changes (JSON)", {
+            "fields": ("changes_formatted",),
+            "classes": ("collapse", "wide"),
+            "description": "Detailed changes made to the object",
         }),
     )
 
@@ -80,45 +87,57 @@ class AuditLogAdmin(admin.ModelAdmin):
                 return f"{obj.user.username} ({full_name})"
             return obj.user.username
         return "system"
-    user_display.short_description = "User"
-    user_display.admin_order_field = 'user__username'
 
-    # ✅ نمایش نام مدل به شکل خوانا در لیست
+    user_display.short_description = "User"
+    user_display.admin_order_field = "user__username"
+
+    # ✅ نمایش نام مدل به شکل خوانا
     def object_model_display(self, obj):
         if obj.content_type:
-            # استفاده از verbose_name اگر موجود باشد
-            model_name = obj.content_type.model_class().__name__ if obj.content_type.model_class() else obj.content_type.model
-            app_label = obj.content_type.app_label
-            return f"{app_label}.{model_name}"
+            model_class = obj.content_type.model_class()
+            model_name = model_class.__name__ if model_class else obj.content_type.model
+            return f"{obj.content_type.app_label}.{model_name}"
         return "-"
-    object_model_display.short_description = "Model"
-    object_model_display.admin_order_field = 'content_type__model'
 
-    # ✅ نمایش خلاصه description در لیست
+    object_model_display.short_description = "Model"
+    object_model_display.admin_order_field = "content_type__model"
+
+    # ✅ نمایش خلاصه description
     def description_short(self, obj):
         if obj.description:
             text = str(obj.description)
-            if len(text) > 75:
-                return text[:75] + '...'
-            return text
+            return text[:75] + "..." if len(text) > 75 else text
         return "-"
-    description_short.short_description = "Description"
-    description_short.admin_order_field = 'description'
 
-    # ✅ نمایش فرمت شده changes (فقط برای نمایش در فرم)
+    description_short.short_description = "Description"
+    description_short.admin_order_field = "description"
+
+    # ✅ نمایش فرمت‌شده changes
     def changes_formatted(self, obj):
         if obj.changes:
             try:
-                # تلاش برای نمایش JSON به صورت فرمت شده
-                changes_dict = obj.changes if isinstance(obj.changes, dict) else json.loads(obj.changes)
-                formatted = json.dumps(changes_dict, indent=2, ensure_ascii=False)
-                return mark_safe(f'<pre style="background:#f5f5f5;padding:10px;border-radius:5px;overflow:auto;">{formatted}</pre>')
+                changes_dict = (
+                    obj.changes
+                    if isinstance(obj.changes, dict)
+                    else json.loads(obj.changes)
+                )
+                formatted = json.dumps(
+                    changes_dict,
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                return mark_safe(
+                    f'<pre style="background:#f5f5f5;'
+                    f'padding:10px;border-radius:5px;overflow:auto;">'
+                    f'{formatted}</pre>'
+                )
             except (json.JSONDecodeError, TypeError):
                 return str(obj.changes)
         return "-"
+
     changes_formatted.short_description = "Changes (Formatted)"
 
-    # ✅ کاملاً Read‑Only
+    # ✅ Admin کاملاً Read‑Only
     def has_add_permission(self, request):
         return False
 
@@ -128,15 +147,9 @@ class AuditLogAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         return False
 
-    # غیرفعال کردن actions در لیست
+    # ✅ غیرفعال کردن bulk actions
     actions = None
 
-    # بهبود عملکرد جستجو برای نمایش تعداد زیادی رکورد
+    # Pagination
     list_per_page = 50
     show_full_result_count = True
-
-    # نمایش timestamp به صورت human-readable در لیست
-    def timestamp_display(self, obj):
-        return obj.timestamp.strftime("%Y-%m-%d %H:%M:%S")
-    timestamp_display.short_description = "Timestamp"
-    timestamp_display.admin_order_field = 'timestamp'

@@ -1,139 +1,164 @@
-# audit_log/signals.py
-
+from django.apps import apps
+from django.db import connection
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.contrib.contenttypes.models import ContentType
-from django.utils import timezone
-from django.db import connection, utils as db_utils # db_utils برای مدیریت خطاها
-import json
 
 from audit_log.models import AuditLog
+from audit_log.utils import compute_changes
+from audit_log.context import get_current_user, is_audit_logging_disabled
 
+print("✅ LOADED audit_log.signals — FINAL MIGRATION SAFE VERSION")
 
 # -------------------------------------------------
-# ابزار کمکی: بررسی آماده بودن Schema (وجود ستون‌های جدید)
+# ✅ HARD GUARDS (NO DB TOUCH BEFORE SAFE)
 # -------------------------------------------------
-def audit_log_schema_is_ready() -> bool:
-    """
-    Checks if the AuditLog table exists AND has the 'resource' column, 
-    preventing issues during migration/test setup when the table exists 
-    but is in an older schema state.
-    """
+
+def _auditlog_table_exists() -> bool:
     try:
-        table_name = AuditLog._meta.db_table
-        
-        # 1. آیا جدول اصلاً وجود دارد؟
-        if table_name not in connection.introspection.table_names():
-            return False
-
-        # 2. آیا ستون‌های جدید وجود دارند؟ (استفاده از PRAGMA table_info برای SQLite)
-        with connection.cursor() as cursor:
-            # PRAGMA table_info به ما لیستی از ستون‌های جدول را می‌دهد
-            cursor.execute(f"PRAGMA table_info({table_name})")
-            # ستون دوم (index 1) نام ستون است.
-            columns = [col[1] for col in cursor.fetchall()] 
-            
-        # چک می‌کنیم که ستون 'resource' به عنوان یک ستون حیاتی از فاز جدید، وجود داشته باشد.
-        return "resource" in columns
-        
-    except db_utils.OperationalError:
-        # اگر در حین چک کردن خطا رخ داد (مثلاً اتصال هنوز برقرار نیست)
-        return False
+        return AuditLog._meta.db_table in connection.introspection.table_names()
     except Exception:
-        # برای هر خطای غیرمنتظره دیگر
         return False
 
 
-# -------------------------------------------------
-# DELETE signal
-# -------------------------------------------------
-@receiver(post_delete)
-def audit_log_delete_signal_receiver(sender, instance, **kwargs):
-    # 1️⃣ جلوگیری از لاگ کردن در زمان migrate / loaddata
+def _is_migration_model(sender) -> bool:
+    return (
+        sender.__module__.startswith("django.db.migrations")
+        or sender.__name__ == "Migration"
+        or sender._meta.app_label == "migrations"
+    )
+
+
+def _should_skip(sender, **kwargs) -> bool:
+    # ✅ apps not ready (startup / migrate)
+    if not apps.ready:
+        return True
+
+    # ✅ raw saves (fixtures)
     if kwargs.get("raw"):
-        return
+        return True
 
-    # 2️⃣ جلوگیری از حلقه بی‌نهایت
-    if sender == AuditLog:
-        return
+    # ✅ unmanaged models
+    if not sender._meta.managed:
+        return True
 
-    # 3️⃣ اگر جدول هنوز ساخته نشده یا schema قدیمی است
-    # ما از تابع جدید و مطمئن‌تر استفاده می‌کنیم
-    if not audit_log_schema_is_ready():
-        return
+    # ✅ migration models (CRITICAL)
+    if _is_migration_model(sender):
+        return True
 
-    # 4️⃣ امکان غیرفعال‌سازی دستی
-    if hasattr(instance, "_audit_log_enabled") and not instance._audit_log_enabled:
-        return
+    # ✅ audit logging disabled
+    if is_audit_logging_disabled():
+        return True
 
-    user = getattr(instance, "updated_by", None)
-    if not user and hasattr(instance, "owner"):
-        user = instance.owner
+    # ✅ audit_log table not ready
+    if not _auditlog_table_exists():
+        return True
 
-    try:
-        content_type = ContentType.objects.get_for_model(sender)
+    # ✅ prevent recursion
+    if sender in {AuditLog, ContentType}:
+        return True
 
-        AuditLog.objects.create(
-            user=user,
-            action="delete",
-            source="signal",
-            content_type=content_type,
-            object_id=instance.pk,
-            changes=None,
-            timestamp=timezone.now(),
-
-            resource=sender._meta.model_name,
-            status="INFO",
-            description=f"{sender.__name__} deleted (id={instance.pk})",
-        )
-    except Exception:
-        # در سیگنال هرگز نباید سیستم را بخوابانیم (به خصوص در محیط تست)
-        pass
+    return False
 
 
 # -------------------------------------------------
-# SAVE signal (create / update)
+# ✅ post_save with Metrics (SAFE)
 # -------------------------------------------------
+
 @receiver(post_save)
-def audit_log_save_signal_receiver(sender, instance, created, **kwargs):
-    # 1️⃣ جلوگیری از لاگ کردن در زمان migrate / loaddata
-    if kwargs.get("raw"):
+def audit_log_post_save(sender, instance, created, **kwargs):
+    if _should_skip(sender, **kwargs):
         return
-
-    # 2️⃣ جلوگیری از حلقه بی‌نهایت
-    if sender == AuditLog:
-        return
-
-    # 3️⃣ اگر جدول هنوز ساخته نشده یا schema قدیمی است
-    if not audit_log_schema_is_ready():
-        return
-
-    # 4️⃣ امکان غیرفعال‌سازی دستی
-    if hasattr(instance, "_audit_log_enabled") and not instance._audit_log_enabled:
-        return
-
-    action_type = "create" if created else "update"
-
-    user = getattr(instance, "updated_by", None)
-    if not user and hasattr(instance, "owner"):
-        user = instance.owner
 
     try:
+        # ✅ ONLY NOW it is safe to touch DB
+        user = get_current_user()
         content_type = ContentType.objects.get_for_model(sender)
 
-        AuditLog.objects.create(
-            user=user,
-            action=action_type,
-            source="signal",
-            content_type=content_type,
-            object_id=instance.pk,
-            changes=None,
-            timestamp=timezone.now(),
+        changes = None
+        if not created and hasattr(instance, "_auditlog_before"):
+            changes = compute_changes(
+                instance._auditlog_before,
+                instance.__dict__,
+            )
 
-            resource=sender._meta.model_name,
-            status="INFO",
-            description=f"{sender.__name__} {action_type} (id={instance.pk})",
-        )
+        if not created and not changes:
+            return
+
+        try:
+            from audit_log.metrics import (
+                audit_log_create_latency_seconds,
+                audit_log_created_total,
+            )
+
+            with audit_log_create_latency_seconds.time():
+                AuditLog.objects.create(
+                    user=user,
+                    action=AuditLog.Action.CREATE if created else AuditLog.Action.UPDATE,
+                    resource=sender.__name__,
+                    content_type=content_type,
+                    object_id=str(instance.pk),
+                    changes=changes,
+                    source="signal",
+                )
+
+            audit_log_created_total.labels(
+                resource=sender.__name__,
+                action="create" if created else "update",
+            ).inc()
+
+        except Exception:
+            # ✅ metrics fail-safe
+            AuditLog.objects.create(
+                user=user,
+                action=AuditLog.Action.CREATE if created else AuditLog.Action.UPDATE,
+                resource=sender.__name__,
+                content_type=content_type,
+                object_id=str(instance.pk),
+                changes=changes,
+                source="signal",
+            )
+
     except Exception:
-        # سیگنال نباید باعث fail شدن تست‌ها شود
-        pass
+        return
+
+
+# -------------------------------------------------
+# ✅ post_delete with Metrics (SAFE)
+# -------------------------------------------------
+
+@receiver(post_delete)
+def audit_log_post_delete(sender, instance, **kwargs):
+    if _should_skip(sender, **kwargs):
+        return
+
+    try:
+        user = get_current_user()
+        content_type = ContentType.objects.get_for_model(sender)
+
+        try:
+            from audit_log.metrics import audit_log_cleanup_total
+
+            AuditLog.objects.create(
+                user=user,
+                action=AuditLog.Action.DELETE,
+                resource=sender.__name__,
+                content_type=content_type,
+                object_id=str(instance.pk),
+                source="signal",
+            )
+
+            audit_log_cleanup_total.inc()
+
+        except Exception:
+            AuditLog.objects.create(
+                user=user,
+                action=AuditLog.Action.DELETE,
+                resource=sender.__name__,
+                content_type=content_type,
+                object_id=str(instance.pk),
+                source="signal",
+            )
+
+    except Exception:
+        return

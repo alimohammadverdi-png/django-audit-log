@@ -1,35 +1,19 @@
-# audit_log/middleware.py
-
-from audit_log.context import (
-    set_current_user,
-    set_current_request,
-    clear_context,
-)
+from audit_log.utils import set_current_user
 
 
-class AuditLogMiddleware:
+class AuditLogUserMiddleware:
     """
-    Stores request and user in thread-local storage
-    for audit logging purposes.
+    Attach request.user to thread local storage
+    so signals can access the current user.
     """
 
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
-        # set request context
-        set_current_request(request)
-
-        # set user context
-        if hasattr(request, "user") and request.user.is_authenticated:
-            set_current_user(request.user)
-        else:
-            set_current_user(None)
-
+        set_current_user(getattr(request, "user", None))
         try:
             response = self.get_response(request)
         finally:
-            # VERY IMPORTANT: avoid leaking context between requests
-            clear_context()
-
+            set_current_user(None)
         return response
