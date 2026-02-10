@@ -21,18 +21,41 @@ class AuditLog(models.Model):
         related_name="audit_logs",
     )
 
-    action = models.CharField(max_length=50, db_index=True)
+    action = models.CharField(
+        max_length=50,
+        db_index=True,
+        choices=Action.choices,
+    )
+
     resource = models.CharField(
-        max_length=255, default="", db_index=True
+        max_length=255,
+        default="",
+        db_index=True,
     )
 
     status = models.CharField(
-        max_length=10, default="INFO", db_index=True
+        max_length=10,
+        default="INFO",
+        db_index=True,
     )
-    description = models.TextField(blank=True, default="")
+
+    description = models.TextField(
+        blank=True,
+        default="",
+    )
 
     source = models.CharField(
-        max_length=10, default="api", db_index=True
+        max_length=10,
+        default="api",
+        db_index=True,
+    )
+
+    # ✅ Correlation ID (Phase 2.4.1)
+    correlation_id = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        db_index=True,
     )
 
     content_type = models.ForeignKey(
@@ -41,14 +64,21 @@ class AuditLog(models.Model):
         blank=True,
         on_delete=models.SET_NULL,
     )
+
     object_id = models.CharField(
-        max_length=64, null=True, blank=True
+        max_length=64,
+        null=True,
+        blank=True,
     )
 
-    changes = models.JSONField(null=True, blank=True)
+    changes = models.JSONField(
+        null=True,
+        blank=True,
+    )
 
     timestamp = models.DateTimeField(
-        auto_now_add=True, db_index=True
+        auto_now_add=True,
+        db_index=True,
     )
 
     class Meta:
@@ -60,6 +90,7 @@ class AuditLog(models.Model):
             models.Index(fields=["source"]),
             models.Index(fields=["user"]),
             models.Index(fields=["timestamp"]),
+            models.Index(fields=["correlation_id"]),
             models.Index(fields=["content_type", "object_id"]),
         ]
 

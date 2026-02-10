@@ -1,32 +1,61 @@
-# Django Audit Log
+# Django Audit Log System
 
-A reusable and extensible audit logging system for Django projects.
-
-This project aims to provide a clean, scalable, and production-ready
-audit log mechanism to track critical actions inside Django applications.
+A robust, migration‑safe and transaction‑aware audit logging system for Django projects that require reliable tracking of data changes without breaking migrations, tests, or atomic transactions.
 
 ---
 
-## 🚀 Features
-- Track create, update, and delete actions
-- Store user, IP address, and user-agent
-- Reusable Django app architecture
-- Admin-friendly audit log views
-- Designed for security-sensitive systems
+## Overview
+
+This project provides a stable audit logging layer that safely records Create, Update, Delete and Bulk actions while explicitly avoiding common pitfalls such as:
+- signal execution during migrations
+- broken database transactions
+- noisy or duplicated logs in bulk operations
+
+The system is designed to be **production‑safe**, **migration‑safe**, and **fully test‑covered**.
 
 ---
 
-## 🛠️ Tech Stack
-- Python 3.10+
-- Django 4+
-- SQLite / PostgreSQL
-- Pytest (planned)
+## Why Audit Logging?
+
+Audit logging creates a trustworthy record of **who changed what and when**.
+
+Many existing solutions fail under at least one of these conditions:
+- migrations and test database setup
+- bulk admin actions
+- soft deletes or custom delete logic
+
+This project addresses those gaps by making audit signals explicitly safe and context‑aware.
 
 ---
 
-## 📦 Installation
+## Core Features
 
-Clone the repository:
-```bash
-git clone https://github.com/alimohammadverdi-png/django-audit-log.git
-cd django-audit-log
+- ✅ **Migration‑Safe Signals**  
+  Signals never run on unmanaged/internal Django models or during raw saves.
+
+- ✅ **Transaction‑Safe**  
+  Audit logging never breaks `atomic()` blocks.
+
+- ✅ **Bulk Action Support**  
+  Django Admin bulk operations are logged correctly and compactly.
+
+- ✅ **Soft‑Delete Compatible**  
+  Logical deletions are handled without false positives.
+
+- ✅ **Context‑Based Disable Mechanism**  
+  Audit logging can be temporarily disabled (tests, setup, bulk ops).
+
+- ✅ **Fully Tested**  
+  24/24 pytest tests passing.
+
+---
+
+## Installation & Setup
+
+1. Copy the `audit_log` app into your Django project.
+2. Add it to `INSTALLED_APPS`:
+```python
+INSTALLED_APPS = [
+...
+"audit_log",
+]

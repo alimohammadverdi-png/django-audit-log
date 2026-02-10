@@ -1,28 +1,27 @@
 from rest_framework.viewsets import ReadOnlyModelViewSet
 from rest_framework.permissions import IsAuthenticated
-
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.filters import SearchFilter
 
 from audit_log.models import AuditLog
 from audit_log.api.serializers import AuditLogSerializer
 from audit_log.api.authentication import BasicAuth401
+from audit_log.api.filters import AuditLogFilter
+from audit_log.api.ordering import AuditLogOrderingFilter
 
 
 class AuditLogViewSet(ReadOnlyModelViewSet):
     serializer_class = AuditLogSerializer
-
-    # ✅ 401 واقعی
     authentication_classes = [BasicAuth401]
     permission_classes = [IsAuthenticated]
 
     filter_backends = [
         DjangoFilterBackend,
-        OrderingFilter,
         SearchFilter,
+        AuditLogOrderingFilter,  # ✅ custom ordering ONLY
     ]
 
-    filterset_fields = ["action", "status", "resource"]
+    filterset_class = AuditLogFilter
     search_fields = ["description"]
     ordering = ["-timestamp"]
 
@@ -35,10 +34,9 @@ class AuditLogViewSet(ReadOnlyModelViewSet):
             .all()
         )
 
-        # ✅ حذف لاگ‌های سیستمی CREATE user
         qs = qs.exclude(
-           action__icontains="CREATE",
-           resource__iexact="user",
+            action="create",
+            resource__iexact="user",
         )
 
         if not user.is_staff:

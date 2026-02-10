@@ -1,15 +1,23 @@
 from django.db import models
 from django.utils.text import slugify
-from django.contrib.auth import get_user_model
 from django.conf import settings
+from django.utils import timezone
+from django.apps import apps
+from django.db import connection
+
 from common.models import AuditModel
+from audit_log.models import AuditLog
+from audit_log.utils import get_current_user
 
 
 User = settings.AUTH_USER_MODEL
 
 
-# Create your models here.
-
+def _auditlog_table_exists():
+    try:
+        return "audit_log_auditlog" in connection.introspection.table_names()
+    except Exception:
+        return False
 
 
 class Category(models.Model):
@@ -46,42 +54,32 @@ class Product(AuditModel):
     stock = models.PositiveIntegerField(verbose_name="موجودی")
     sku = models.CharField(max_length=50, unique=True, verbose_name="کد محصول (SKU)")
     is_active = models.BooleanField(default=True, verbose_name="فعال")
-    image = models.ImageField(
-        upload_to="products/",
-        blank=True,
-        null=True,
-        verbose_name="تصویر محصول"
-    )
+    image = models.ImageField(upload_to="products/", blank=True, null=True)
 
-    # 🔹 Ownership (OLP)
     owner = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
         related_name="owned_products",
-        verbose_name="مالک",
-        editable=False
+        editable=False,
+        verbose_name="مالک"
     )
 
-    # 🔹 Audit timestamps
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاریخ ایجاد")
-    updated_at = models.DateTimeField(auto_now=True, verbose_name="آخرین بروزرسانی")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
-    # 🔹 Audit users
     created_by = models.ForeignKey(
         User,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        related_name="products_created",
-        verbose_name="ایجاد شده توسط"
+        related_name="products_created"
     )
     updated_by = models.ForeignKey(
         User,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        related_name="products_updated",
-        verbose_name="ویرایش شده توسط"
+        related_name="products_updated"
     )
 
     class Meta:
@@ -91,4 +89,30 @@ class Product(AuditModel):
 
     def __str__(self):
         return self.name
-    
+
+    # ✅ FINAL: Soft delete + audit log (migration & test safe)
+    def delete(self, using=None, keep_parents=False):
+        if self.deleted_at:
+            return
+
+        # ⛔️ migrate / startup safety
+        if not apps.ready or not _auditlog_table_exists():
+            self.deleted_at = timezone.now()
+            self.save(update_fields=["deleted_at"])
+            return
+
+        try:
+            AuditLog.objects.create(
+                user=get_current_user(),
+                action="delete",
+                resource="Product",
+                content_type=None,
+                object_id=str(self.pk),
+                source="model",
+                changes={"soft": True},
+            )
+        except Exception:
+            pass
+
+        self.deleted_at = timezone.now()
+        self.save(update_fields=["deleted_at"])

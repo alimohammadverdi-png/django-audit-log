@@ -22,11 +22,6 @@ class ContentTypeReadOnlySerializer(serializers.ModelSerializer):
 
 
 class AuditLogSerializer(serializers.ModelSerializer):
-    """
-    Read-only serializer for AuditLog API
-    Fully aligned with Phase 4.2 Contract
-    """
-
     user = UserReadOnlySerializer(read_only=True)
     content_type = ContentTypeReadOnlySerializer(read_only=True)
 
@@ -36,14 +31,13 @@ class AuditLogSerializer(serializers.ModelSerializer):
             "id",
             "user",
             "action",
-            "resource",       # ✅ جدید
-            "status",         # ✅ جدید
-            "description",    # ✅ حیاتی برای search
+            "resource",
+            "status",
+            "description",
             "source",
             "content_type",
             "object_id",
             "changes",
-            "timestamp",      # ✅ جایگزین created_at
+            "timestamp",  # ✅ only real DB field
         )
         read_only_fields = fields
-
