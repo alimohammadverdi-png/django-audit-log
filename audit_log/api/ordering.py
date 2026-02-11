@@ -2,19 +2,20 @@ from rest_framework.filters import OrderingFilter
 
 
 class AuditLogOrderingFilter(OrderingFilter):
-    def remove_invalid_fields(self, queryset, ordering, view, request):
-        mapped = []
+    ordering_param = "ordering"
 
-        for term in ordering:
-            desc = term.startswith("-")
-            field = term.lstrip("-")
+    def filter_queryset(self, request, queryset, view):
+        ordering = request.query_params.get(self.ordering_param)
 
-            # ✅ API alias → DB field
-            if field == "created_at":
-                field = "timestamp"
+        # ✅ default
+        if not ordering:
+            return queryset.order_by("-timestamp")
 
-            mapped.append(f"-{field}" if desc else field)
+        if ordering == "created_at":
+            return queryset.order_by("timestamp")
 
-        return super().remove_invalid_fields(
-            queryset, mapped, view, request
-        )
+        if ordering == "-created_at":
+            return queryset.order_by("-timestamp")
+
+        # ⛔ NEVER pass unknown fields to ORM
+        return queryset.order_by("-timestamp")

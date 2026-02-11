@@ -15,14 +15,17 @@ class AuditLogViewSet(ReadOnlyModelViewSet):
     authentication_classes = [BasicAuth401]
     permission_classes = [IsAuthenticated]
 
+    # ❗ OrderingFilter پیش‌فرض DRF عمداً حذف شده
     filter_backends = [
         DjangoFilterBackend,
         SearchFilter,
-        AuditLogOrderingFilter,  # ✅ custom ordering ONLY
+        AuditLogOrderingFilter,   # ✅ ONLY custom ordering
     ]
 
     filterset_class = AuditLogFilter
     search_fields = ["description"]
+
+    # ✅ ORM FIELD — نه API alias
     ordering = ["-timestamp"]
 
     def get_queryset(self):
@@ -34,6 +37,7 @@ class AuditLogViewSet(ReadOnlyModelViewSet):
             .all()
         )
 
+        # hide noisy system logs
         qs = qs.exclude(
             action="create",
             resource__iexact="user",
